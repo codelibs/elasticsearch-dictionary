@@ -4,6 +4,7 @@ Elasticsearch Dictionary
 ## Overview
 
 Dictionary Plugin provides a feature to manage dictionary files for indices.
+Installing this plugin, elasticsearch is able to create/restore a snapshot with dictionary files automatically.
 
 ## Version
 
@@ -18,7 +19,7 @@ Please file an [issue](https://github.com/codelibs/elasticsearch-dictionary/issu
 
 ## Installation
 
-### Install DynaRank Plugin
+### Install Dictionary Plugin
 
 TBD..
 
