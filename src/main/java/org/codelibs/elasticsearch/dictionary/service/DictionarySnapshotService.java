@@ -130,9 +130,10 @@ public class DictionarySnapshotService extends AbstractComponent implements
         if (logger.isDebugEnabled()) {
             logger.debug("Creating dictionary index: {}", index);
         }
-        final CreateIndexRequestBuilder builder = client.admin().indices()
-                .prepareCreate(index);
         try {
+            final CreateIndexRequestBuilder builder = client.admin().indices()
+                    .prepareCreate(index)
+                    .setSettings(createDictionarySettingBuilder());
             for (final String type : indexDictionaryMap.keySet()) {
                 builder.addMapping(type, createDictionaryMappingBuilder(type));
             }
@@ -351,6 +352,19 @@ public class DictionarySnapshotService extends AbstractComponent implements
             throw new DictionaryException("Failed to index " + type + ":"
                     + path + " to " + index, e);
         }
+    }
+
+    private XContentBuilder createDictionarySettingBuilder() throws IOException {
+        final XContentBuilder builder = XContentFactory.jsonBuilder()//
+                .startObject()//
+
+                .startObject("index")//
+                .field("number_of_shards", 1)//
+                .field("number_of_replicas", 0)//
+                .endObject()//
+
+                .endObject();
+        return builder;
     }
 
     private XContentBuilder createDictionaryMappingBuilder(final String type)
