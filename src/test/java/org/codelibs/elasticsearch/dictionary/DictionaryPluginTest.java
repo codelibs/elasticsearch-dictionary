@@ -34,26 +34,30 @@ public class DictionaryPluginTest extends TestCase {
 
     private String repositoryName;
 
-    private File userDictFile;
+    private File[] userDictFiles;
+
+    private File[] synonymFiles;
+
+    private int numOfNode = 3;
 
     @Before
     public void setUp() throws Exception {
-        repositoryDir = File.createTempFile("snapshot1", "");
+        repositoryDir = File.createTempFile("mysnapshot", "");
         repositoryDir.delete();
         repositoryDir.mkdirs();
-        repositoryName = "repo";
+        repositoryName = "myrepo";
 
         runner = new ElasticsearchClusterRunner();
         runner.onBuild(new ElasticsearchClusterRunner.Builder() {
             @Override
             public void build(final int number, final Builder settingsBuilder) {
                 settingsBuilder.put("http.cors.enabled", true);
-                settingsBuilder.put("index.number_of_replicas", 0);
+                settingsBuilder.put("index.number_of_replicas", 1);
             }
         }).build(
                 newConfigs()
                         .clusterName("es-dict-" + System.currentTimeMillis())
-                        .numOfNode(1).ramIndexStore());
+                        .numOfNode(numOfNode).ramIndexStore());
         runner.ensureGreen();
 
         Node node = runner.node();
@@ -67,18 +71,27 @@ public class DictionaryPluginTest extends TestCase {
                                 repositoryDir.getAbsolutePath())).execute()
                 .actionGet();
 
-        String confPath = node.settings().get("path.conf");
-        userDictFile = new File(confPath, "userdict_ja.txt");
-        updateDictionary("関西国際空港,関西 国際 空港,カンサイ コクサイ クウコウ,カスタム名詞");
+        userDictFiles = new File[numOfNode];
+        synonymFiles = new File[numOfNode];
+        for (int i = 0; i < numOfNode; i++) {
+            String confPath = runner.getNode(i).settings().get("path.conf");
+            userDictFiles[i] = new File(confPath, "userdict_ja.txt");
+            updateDictionary(userDictFiles[i],
+                    "関西国際空港,関西 国際 空港,カンサイ コクサイ クウコウ,カスタム名詞");
+
+            synonymFiles[i] = new File(confPath, "synonym.txt");
+            updateDictionary(synonymFiles[i], "i-pod, i pod => ipod");
+        }
 
         runner.print("Repository: " + repositoryDir.getAbsolutePath());
 
     }
 
-    private void updateDictionary(String content) throws IOException,
-            UnsupportedEncodingException, FileNotFoundException {
+    private void updateDictionary(File file, String content)
+            throws IOException, UnsupportedEncodingException,
+            FileNotFoundException {
         try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(
-                new FileOutputStream(userDictFile), "UTF-8"))) {
+                new FileOutputStream(file), "UTF-8"))) {
             bw.write(content);
             bw.flush();
         }
@@ -100,8 +113,11 @@ public class DictionaryPluginTest extends TestCase {
                 + "\"tokenizer\":{"//
                 + "\"kuromoji_user_dict\":{\"type\":\"kuromoji_tokenizer\",\"mode\":\"extended\",\"discard_punctuation\":\"false\",\"user_dictionary\":\"userdict_ja.txt\"}"
                 + "},"//
+                + "\"filter\":{"//
+                + "\"synonym\":{\"type\":\"synonym\",\"synonyms_path\":\"synonym.txt\"}"//
+                + "},"//
                 + "\"analyzer\":{"
-                + "\"my_analyzer\":{\"type\":\"custom\",\"tokenizer\":\"kuromoji_user_dict\"}"
+                + "\"my_analyzer\":{\"type\":\"custom\",\"tokenizer\":\"kuromoji_user_dict\",\"filter\":[\"synonym\"]}"
                 + "}"//
                 + "}}}";
         runner.createIndex(index,
@@ -171,22 +187,22 @@ public class DictionaryPluginTest extends TestCase {
             assertEquals(0, snapshotInfo.failedShards());
         }
 
-        Thread.sleep(5000L);
+        Thread.sleep(5000L);// TODO
 
         runner.deleteIndex(index);
         runner.flush();
 
         assertFalse(runner.indexExists(index));
 
-        while (!userDictFile.delete()) {
-            System.out
-                    .println("Deleting "
-                            + userDictFile.getAbsolutePath()
-                            + ". In Windows environment, this test case may not work. If so, skip testing.");
-            Thread.sleep(1000L);
+        for (int i = 0; i < numOfNode; i++) {
+            userDictFiles[i].delete();
+            synonymFiles[i].delete();
         }
 
-        assertFalse(userDictFile.exists());
+        for (int i = 0; i < numOfNode; i++) {
+            assertFalse(userDictFiles[i].exists());
+            assertFalse(synonymFiles[i].exists());
+        }
 
         runner.ensureGreen();
 
@@ -200,7 +216,10 @@ public class DictionaryPluginTest extends TestCase {
 
         assertTrue(runner.indexExists(index));
 
-        assertTrue(userDictFile.exists());
+        for (int i = 0; i < numOfNode; i++) {
+            assertTrue(userDictFiles[i].exists());
+            assertTrue(synonymFiles[i].exists());
+        }
 
     }
 }
