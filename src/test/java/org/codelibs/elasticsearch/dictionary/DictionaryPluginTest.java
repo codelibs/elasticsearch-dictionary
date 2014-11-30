@@ -104,7 +104,7 @@ public class DictionaryPluginTest extends TestCase {
         repositoryDir.delete();
     }
 
-    public void test_run() throws Exception {
+    public void test_indexWithDictionaries() throws Exception {
         String index = "sample";
         String type = "data";
 
@@ -172,11 +172,6 @@ public class DictionaryPluginTest extends TestCase {
 
         Client client = runner.client();
 
-        //        client.admin().indices().prepareClose(index).execute().actionGet();
-        //        runner.ensureYellow();
-        //        client.admin().indices().prepareOpen(index).execute().actionGet();
-        //        runner.ensureYellow();
-
         String snapshotName = "snapshot";
 
         {
@@ -187,7 +182,7 @@ public class DictionaryPluginTest extends TestCase {
             assertEquals(0, snapshotInfo.failedShards());
         }
 
-        Thread.sleep(5000L);// TODO
+        Thread.sleep(5000); // TODO
 
         runner.deleteIndex(index);
         runner.flush();
@@ -220,6 +215,89 @@ public class DictionaryPluginTest extends TestCase {
             assertTrue(userDictFiles[i].exists());
             assertTrue(synonymFiles[i].exists());
         }
+
+    }
+
+    public void test_indexWithoutDictionaries() throws Exception {
+        String index = "sample";
+        String type = "data";
+
+        // create an index
+        runner.createIndex(index, null);
+        runner.ensureYellow(index);
+
+        // create a mapping
+        final XContentBuilder mappingBuilder = XContentFactory.jsonBuilder()//
+                .startObject()//
+                .startObject(type)//
+                .startObject("properties")//
+
+                // id
+                .startObject("id")//
+                .field("type", "string")//
+                .field("index", "not_analyzed")//
+                .endObject()//
+
+                // msg
+                .startObject("msg")//
+                .field("type", "string")//
+                .endObject()//
+
+                // order
+                .startObject("order")//
+                .field("type", "long")//
+                .endObject()//
+
+                // @timestamp
+                .startObject("@timestamp")//
+                .field("type", "date")//
+                .endObject()//
+
+                .endObject()//
+                .endObject()//
+                .endObject();
+        runner.createMapping(index, type, mappingBuilder);
+
+        // create 1000 documents
+        for (int i = 1; i <= 1000; i++) {
+            final IndexResponse indexResponse1 = runner.insert(index, type,
+                    String.valueOf(i), "{\"id\":\"" + i + "\",\"msg\":\"test "
+                            + i + "\",\"order\":" + i
+                            + ",\"@timestamp\":\"2000-01-01T00:00:00\"}");
+            assertTrue(indexResponse1.isCreated());
+        }
+        runner.flush();
+
+        assertTrue(runner.indexExists(index));
+
+        Client client = runner.client();
+
+        String snapshotName = "snapshot";
+
+        {
+            CreateSnapshotResponse response = client.admin().cluster()
+                    .prepareCreateSnapshot(repositoryName, snapshotName)
+                    .setWaitForCompletion(true).execute().actionGet();
+            SnapshotInfo snapshotInfo = response.getSnapshotInfo();
+            assertEquals(0, snapshotInfo.failedShards());
+        }
+
+        runner.deleteIndex(index);
+        runner.flush();
+
+        assertFalse(runner.indexExists(index));
+
+        runner.ensureGreen();
+
+        {
+            RestoreSnapshotResponse response = client.admin().cluster()
+                    .prepareRestoreSnapshot(repositoryName, snapshotName)
+                    .setWaitForCompletion(true).execute().actionGet();
+            RestoreInfo restoreInfo = response.getRestoreInfo();
+            assertEquals(0, restoreInfo.failedShards());
+        }
+
+        assertTrue(runner.indexExists(index));
 
     }
 }

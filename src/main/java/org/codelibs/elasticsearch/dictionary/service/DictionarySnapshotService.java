@@ -114,17 +114,41 @@ public class DictionarySnapshotService extends AbstractComponent implements
                 for (final Map.Entry<String, List<Tuple<String, File>>> entry : indexDictionaryMap
                         .entrySet()) {
                     for (final Tuple<String, File> dictInfo : entry.getValue()) {
-                        logger.debug("{}/{} is found in {}.", dictInfo.v1(),
+                        logger.debug("{} => {} is found in {}.", dictInfo.v1(),
                                 dictInfo.v2(), entry.getKey());
                     }
                 }
             }
-            snapshotDictionaryIndex(snapshotId, indexDictionaryMap);
+            snapshotDictionaryIndex(snapshotId, indexDictionaryMap,
+                    new ActionListener<Void>() {
+                        @Override
+                        public void onResponse(final Void response) {
+                            if (logger.isDebugEnabled()) {
+                                logger.debug(
+                                        "Created {} snapshot.",
+                                        dictionaryIndex + "_"
+                                                + snapshotId.getRepository()
+                                                + "_"
+                                                + snapshotId.getSnapshot());
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(final Throwable e) {
+                            logger.error(
+                                    "Failed to take a snapshot for {}.",
+                                    e,
+                                    dictionaryIndex + "_"
+                                            + snapshotId.getRepository() + "_"
+                                            + snapshotId.getSnapshot());
+                        }
+                    });
         }
     }
 
     private void snapshotDictionaryIndex(final SnapshotId snapshotId,
-            final Map<String, List<Tuple<String, File>>> indexDictionaryMap) {
+            final Map<String, List<Tuple<String, File>>> indexDictionaryMap,
+            final ActionListener<Void> listener) {
         final String index = dictionaryIndex + "_" + snapshotId.getRepository()
                 + "_" + snapshotId.getSnapshot();
         if (logger.isDebugEnabled()) {
@@ -148,7 +172,7 @@ public class DictionarySnapshotService extends AbstractComponent implements
 
                     try {
                         writeDictionaryIndex(index, snapshotId,
-                                indexDictionaryMap);
+                                indexDictionaryMap, listener);
                     } catch (final Exception e) {
                         deleteDictionaryIndex(index);
                         throw e;
@@ -157,19 +181,21 @@ public class DictionarySnapshotService extends AbstractComponent implements
 
                 @Override
                 public void onFailure(final Throwable e) {
-                    logger.error("Failed to take a snapshot for {}.", e,
-                            dictionaryIndex);
+                    listener.onFailure(e);
                 }
             });
         } catch (final Exception e) {
-            logger.error("Failed to take a snapshot for {}.", e,
-                    dictionaryIndex);
+            listener.onFailure(e);
         }
     }
 
     private void writeDictionaryIndex(final String index,
             final SnapshotId snapshotId,
-            final Map<String, List<Tuple<String, File>>> indexDictionaryMap) {
+            final Map<String, List<Tuple<String, File>>> indexDictionaryMap,
+            final ActionListener<Void> listener) {
+        if (logger.isDebugEnabled()) {
+            logger.debug("Writing dictionary index: {}", index);
+        }
         final Queue<Tuple<String, Tuple<String, File>>> dictionaryQueue = new LinkedList<>();
         for (final Map.Entry<String, List<Tuple<String, File>>> entry : indexDictionaryMap
                 .entrySet()) {
@@ -186,19 +212,22 @@ public class DictionarySnapshotService extends AbstractComponent implements
 
             @Override
             public void onResponse(final Void response) {
-                flushDictionaryIndex(index, snapshotId);
+                flushDictionaryIndex(index, snapshotId, listener);
             }
 
             @Override
             public void onFailure(final Throwable e) {
+                listener.onFailure(e);
                 deleteDictionaryIndex(index);
-                logger.error("Failed to write data to {}.", e, index);
             }
         });
     }
 
     private void flushDictionaryIndex(final String index,
-            final SnapshotId snapshotId) {
+            final SnapshotId snapshotId, final ActionListener<Void> listener) {
+        if (logger.isDebugEnabled()) {
+            logger.debug("Flushing dictionary index: {}", index);
+        }
         client.admin().indices().prepareFlush(index).setWaitIfOngoing(true)
                 .execute(new ActionListener<FlushResponse>() {
 
@@ -215,34 +244,35 @@ public class DictionarySnapshotService extends AbstractComponent implements
                                             public void onResponse(
                                                     final ClusterHealthResponse response) {
                                                 createDictionarySnapshot(index,
-                                                        snapshotId);
+                                                        snapshotId, listener);
                                             }
 
                                             @Override
                                             public void onFailure(
                                                     final Throwable e) {
+                                                listener.onFailure(e);
                                                 deleteDictionaryIndex(index);
-                                                logger.error(
-                                                        "Failed to flush data to {}.",
-                                                        e, index);
                                             }
                                         });
                     }
 
                     @Override
                     public void onFailure(final Throwable e) {
+                        listener.onFailure(e);
                         deleteDictionaryIndex(index);
-                        logger.error("Failed to flush data to {}.", e, index);
                     }
 
                 });
     }
 
     private void createDictionarySnapshot(final String index,
-            final SnapshotId snapshotId) {
+            final SnapshotId snapshotId, final ActionListener<Void> listener) {
         final String repository = snapshotId.getRepository();
         final String snapshot = snapshotId.getSnapshot();
         final String name = snapshot + index;
+        if (logger.isDebugEnabled()) {
+            logger.debug("Creating dictionary snapshot: {}", name);
+        }
         final SnapshotRequest request = new SnapshotRequest(
                 "create dictionary snapshot", name, repository);
         request.indices(new String[] { index });
@@ -260,6 +290,7 @@ public class DictionarySnapshotService extends AbstractComponent implements
                                     final SnapshotId snapshotId2,
                                     final SnapshotInfo snapshot) {
                                 if (snapshotId.equals(snapshotId)) {
+                                    listener.onResponse(null);
                                     deleteDictionaryIndex(index);
                                     snapshotsService.removeListener(this);
                                 }
@@ -270,6 +301,7 @@ public class DictionarySnapshotService extends AbstractComponent implements
                                     final SnapshotId snapshotId2,
                                     final Throwable t) {
                                 if (snapshotId.equals(snapshotId)) {
+                                    listener.onFailure(t);
                                     deleteDictionaryIndex(index);
                                     snapshotsService.removeListener(this);
                                 }
@@ -279,8 +311,8 @@ public class DictionarySnapshotService extends AbstractComponent implements
 
             @Override
             public void onFailure(final Throwable t) {
+                listener.onFailure(t);
                 deleteDictionaryIndex(index);
-                logger.error("Failed to take a snapshot for {}.", t, index);
             }
         });
     }

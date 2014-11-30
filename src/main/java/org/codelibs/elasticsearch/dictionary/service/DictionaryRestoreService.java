@@ -45,6 +45,7 @@ import org.elasticsearch.snapshots.RestoreInfo;
 import org.elasticsearch.snapshots.RestoreService;
 import org.elasticsearch.snapshots.RestoreService.RestoreRequest;
 import org.elasticsearch.snapshots.SnapshotInfo;
+import org.elasticsearch.snapshots.SnapshotMissingException;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.BaseTransportRequestHandler;
 import org.elasticsearch.transport.TransportChannel;
@@ -98,7 +99,7 @@ public class DictionaryRestoreService extends AbstractComponent {
                 ((RestoreActionFilter) filter)
                         .setDictionaryRestoreService(this);
                 if (logger.isDebugEnabled()) {
-                    logger.debug("Set DynamicRanker to " + filter);
+                    logger.debug("Set DictionaryRestoreService to " + filter);
                 }
             }
         }
@@ -140,9 +141,13 @@ public class DictionaryRestoreService extends AbstractComponent {
 
                     @Override
                     public void onFailure(final Throwable e) {
-                        listener.onFailure(new DictionaryException(
-                                "Failed to find " + dictionarySnapshot
-                                        + " snapshot.", e));
+                        if (e instanceof SnapshotMissingException) {
+                            listener.onResponse(null);
+                        } else {
+                            listener.onFailure(new DictionaryException(
+                                    "Failed to find " + dictionarySnapshot
+                                            + " snapshot.", e));
+                        }
                     }
                 });
     }
@@ -151,10 +156,10 @@ public class DictionaryRestoreService extends AbstractComponent {
             final String snapshot, final String dictionarySnapshot,
             final String[] indices, final ActionListener<Void> listener) {
         final RestoreRequest request = new RestoreRequest(
-                "restore dictionary snapshot", repository, dictionarySnapshot,
-                Strings.EMPTY_ARRAY, IndicesOptions.strictExpandOpen(), null,
-                null, ImmutableSettings.EMPTY, masterNodeTimeout, false, false,
-                false);
+                "restore dictionary snapshot[" + dictionarySnapshot + "]",
+                repository, dictionarySnapshot, Strings.EMPTY_ARRAY,
+                IndicesOptions.strictExpandOpen(), null, null,
+                ImmutableSettings.EMPTY, masterNodeTimeout, false, false, false);
         restoreService.restoreSnapshot(request,
                 new ActionListener<RestoreInfo>() {
                     @Override
@@ -170,27 +175,32 @@ public class DictionaryRestoreService extends AbstractComponent {
                                         if (snapshotId
                                                 .equals(restoreCompletionResponse
                                                         .getSnapshotId())) {
-                                            final ImmutableList<String> dictionaryIndices = restoreCompletionResponse
-                                                    .getRestoreInfo().indices();
-                                            if (logger.isDebugEnabled()) {
-                                                logger.debug(
-                                                        "Snapshot {} has {}.",
-                                                        snapshotId,
-                                                        dictionaryIndices);
+                                            try {
+                                                final ImmutableList<String> dictionaryIndices = restoreCompletionResponse
+                                                        .getRestoreInfo()
+                                                        .indices();
+                                                if (logger.isDebugEnabled()) {
+                                                    logger.debug(
+                                                            "Snapshot {} has {}.",
+                                                            snapshotId,
+                                                            dictionaryIndices);
+                                                }
+                                                if (dictionaryIndices.isEmpty()) {
+                                                    listener.onFailure(new DictionaryException(
+                                                            dictionarySnapshot
+                                                                    + " snapshot does not have indices."));
+                                                } else {
+                                                    restoreDictionaryFiles(
+                                                            indices,
+                                                            dictionaryIndices
+                                                                    .toArray(new String[dictionaryIndices
+                                                                            .size()]),
+                                                            listener);
+                                                }
+                                            } finally {
+                                                restoreService
+                                                        .removeListener(this);
                                             }
-                                            if (dictionaryIndices.isEmpty()) {
-                                                listener.onFailure(new DictionaryException(
-                                                        dictionarySnapshot
-                                                                + " snapshot does not have indices."));
-                                            } else {
-                                                restoreIndexFiles(
-                                                        indices,
-                                                        dictionaryIndices
-                                                                .toArray(new String[dictionaryIndices
-                                                                        .size()]),
-                                                        listener);
-                                            }
-                                            restoreService.removeListener(this);
                                         }
                                     }
 
@@ -213,21 +223,22 @@ public class DictionaryRestoreService extends AbstractComponent {
                 });
     }
 
-    private void restoreIndexFiles(final String[] indices,
+    private void restoreDictionaryFiles(final String[] indices,
             final String[] dictionaryIndices,
             final ActionListener<Void> listener) {
         final ClusterState state = clusterService.state();
         final DiscoveryNodes nodes = state.nodes();
         final UnmodifiableIterator<DiscoveryNode> nodesIt = nodes.dataNodes()
                 .valuesIt();
-        restoreIndexFile(nodesIt, dictionaryIndices, listener);
+        restoreDictionaryFile(nodesIt, dictionaryIndices, listener);
     }
 
-    private void restoreIndexFile(
+    private void restoreDictionaryFile(
             final UnmodifiableIterator<DiscoveryNode> nodesIt,
             final String[] dictionaryIndices,
             final ActionListener<Void> listener) {
         if (!nodesIt.hasNext()) {
+            // wrote all dictionaries in all data node
             listener.onResponse(null);
             for (final String index : dictionaryIndices) {
                 deleteDictionaryIndex(index);
@@ -246,7 +257,7 @@ public class DictionaryRestoreService extends AbstractComponent {
                         @Override
                         public void handleResponse(
                                 final RestoreDictionaryResponse response) {
-                            restoreIndexFile(nodesIt, dictionaryIndices,
+                            restoreDictionaryFile(nodesIt, dictionaryIndices,
                                     listener);
                         }
 
@@ -422,7 +433,7 @@ public class DictionaryRestoreService extends AbstractComponent {
         }
     }
 
-    public static class RestoreDictionaryRequest extends TransportRequest {
+    private static class RestoreDictionaryRequest extends TransportRequest {
 
         private String[] indices;
 
