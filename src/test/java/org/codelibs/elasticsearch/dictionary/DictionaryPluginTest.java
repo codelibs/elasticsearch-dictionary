@@ -186,21 +186,12 @@ public class DictionaryPluginTest extends TestCase {
             assertEquals(0, snapshotInfo.failedShards());
         }
 
-        int count = 0;
-        int size = 0;
-        do {
-            Thread.sleep(1000);
-            try (CurlResponse response = Curl.get(runner.node(),
-                    "/_snapshot/" + repositoryName + "/_all").execute()) {
-                Map<String, Object> map = response.getContentAsMap();
-                List<Object> snapshots = (List<Object>) map.get("snapshots");
-                size = snapshots.size();
-            }
-            if (count > 20) {
-                throw new IllegalStateException("count is over");
-            }
-            count++;
-        } while (size != 2);
+        try (CurlResponse response = Curl.get(runner.node(),
+                "/_snapshot/" + repositoryName + "/_all").execute()) {
+            Map<String, Object> map = response.getContentAsMap();
+            List<Object> snapshots = (List<Object>) map.get("snapshots");
+            assertEquals(2, snapshots.size());
+        }
 
         runner.deleteIndex(index);
         runner.flush();

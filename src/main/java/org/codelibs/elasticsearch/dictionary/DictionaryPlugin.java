@@ -3,6 +3,7 @@ package org.codelibs.elasticsearch.dictionary;
 import java.util.Collection;
 
 import org.codelibs.elasticsearch.dictionary.filter.RestoreActionFilter;
+import org.codelibs.elasticsearch.dictionary.filter.SnapshotActionFilter;
 import org.codelibs.elasticsearch.dictionary.module.DictionaryModule;
 import org.elasticsearch.action.ActionModule;
 import org.elasticsearch.common.collect.Lists;
@@ -30,6 +31,7 @@ public class DictionaryPlugin extends AbstractPlugin {
     }
 
     public void onModule(final ActionModule module) {
+        module.registerFilter(SnapshotActionFilter.class);
         module.registerFilter(RestoreActionFilter.class);
     }
 

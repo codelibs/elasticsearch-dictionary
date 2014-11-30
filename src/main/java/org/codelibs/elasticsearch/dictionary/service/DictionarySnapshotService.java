@@ -14,6 +14,7 @@ import java.util.Queue;
 
 import org.codelibs.elasticsearch.dictionary.DictionaryConstants;
 import org.codelibs.elasticsearch.dictionary.DictionaryException;
+import org.codelibs.elasticsearch.dictionary.filter.SnapshotActionFilter;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
@@ -21,6 +22,8 @@ import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexResponse;
 import org.elasticsearch.action.admin.indices.flush.FlushResponse;
 import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.support.ActionFilter;
+import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.cluster.metadata.SnapshotId;
 import org.elasticsearch.common.bytes.ChannelBufferBytesReference;
@@ -40,11 +43,9 @@ import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.snapshots.SnapshotInfo;
 import org.elasticsearch.snapshots.SnapshotsService;
 import org.elasticsearch.snapshots.SnapshotsService.CreateSnapshotListener;
-import org.elasticsearch.snapshots.SnapshotsService.SnapshotCompletionListener;
 import org.elasticsearch.snapshots.SnapshotsService.SnapshotRequest;
 
-public class DictionarySnapshotService extends AbstractComponent implements
-        SnapshotCompletionListener {
+public class DictionarySnapshotService extends AbstractComponent {
 
     private SnapshotsService snapshotsService;
 
@@ -64,7 +65,7 @@ public class DictionarySnapshotService extends AbstractComponent implements
     public DictionarySnapshotService(final Settings settings,
             final Client client, final Environment env,
             final IndicesService indicesService,
-            final SnapshotsService snapshotsService) {
+            final SnapshotsService snapshotsService, final ActionFilters filters) {
         super(settings);
         this.client = client;
         this.env = env;
@@ -78,15 +79,19 @@ public class DictionarySnapshotService extends AbstractComponent implements
                 "dictionary.snapshot.master_node_timeout",
                 TimeValue.timeValueSeconds(30));
 
-        snapshotsService.addListener(this);
+        for (final ActionFilter filter : filters.filters()) {
+            if (filter instanceof SnapshotActionFilter) {
+                ((SnapshotActionFilter) filter)
+                        .setDictionarySnapshotService(this);
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Set SnapshotActionFilter to " + filter);
+                }
+            }
+        }
     }
 
-    @Override
-    public void onSnapshotCompletion(final SnapshotId snapshotId,
-            final SnapshotInfo snapshot) {
-        if (snapshotId.getSnapshot().contains(dictionaryIndex)) {
-            return;
-        }
+    public void createDictionarySnapshot(final SnapshotId snapshotId,
+            final SnapshotInfo snapshot, final ActionListener<Void> listener) {
 
         // find dictionary files
         final Map<String, List<Tuple<String, File>>> indexDictionaryMap = new HashMap<>();
@@ -131,18 +136,16 @@ public class DictionarySnapshotService extends AbstractComponent implements
                                                 + "_"
                                                 + snapshotId.getSnapshot());
                             }
+                            listener.onResponse(null);
                         }
 
                         @Override
                         public void onFailure(final Throwable e) {
-                            logger.error(
-                                    "Failed to take a snapshot for {}.",
-                                    e,
-                                    dictionaryIndex + "_"
-                                            + snapshotId.getRepository() + "_"
-                                            + snapshotId.getSnapshot());
+                            listener.onFailure(e);
                         }
                     });
+        } else {
+            listener.onResponse(null);
         }
     }
 
@@ -470,11 +473,6 @@ public class DictionarySnapshotService extends AbstractComponent implements
             }
         }
         return false;
-    }
-
-    @Override
-    public void onSnapshotFailure(final SnapshotId snapshotId, final Throwable t) {
-        // nothing
     }
 
 }
