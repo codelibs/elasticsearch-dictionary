@@ -10,7 +10,7 @@ import java.util.Set;
 
 import org.codelibs.elasticsearch.dictionary.DictionaryConstants;
 import org.codelibs.elasticsearch.dictionary.DictionaryException;
-import org.codelibs.elasticsearch.dictionary.filter.RestoreActionFilter;
+import org.codelibs.elasticsearch.dictionary.filter.RestoreSnapshotActionFilter;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.snapshots.get.GetSnapshotsResponse;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexResponse;
@@ -95,8 +95,8 @@ public class DictionaryRestoreService extends AbstractComponent {
                 "dictionary.restore.max_num_of_dictionaries", 100);
 
         for (final ActionFilter filter : filters.filters()) {
-            if (filter instanceof RestoreActionFilter) {
-                ((RestoreActionFilter) filter)
+            if (filter instanceof RestoreSnapshotActionFilter) {
+                ((RestoreSnapshotActionFilter) filter)
                         .setDictionaryRestoreService(this);
                 if (logger.isDebugEnabled()) {
                     logger.debug("Set DictionaryRestoreService to " + filter);

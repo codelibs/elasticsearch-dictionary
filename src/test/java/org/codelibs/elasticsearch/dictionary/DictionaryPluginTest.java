@@ -18,6 +18,7 @@ import org.codelibs.elasticsearch.runner.ElasticsearchClusterRunner;
 import org.codelibs.elasticsearch.runner.net.Curl;
 import org.codelibs.elasticsearch.runner.net.CurlResponse;
 import org.elasticsearch.action.admin.cluster.snapshots.create.CreateSnapshotResponse;
+import org.elasticsearch.action.admin.cluster.snapshots.delete.DeleteSnapshotResponse;
 import org.elasticsearch.action.admin.cluster.snapshots.restore.RestoreSnapshotResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.client.Client;
@@ -223,6 +224,24 @@ public class DictionaryPluginTest extends TestCase {
         for (int i = 0; i < numOfNode; i++) {
             assertTrue(userDictFiles[i].exists());
             assertTrue(synonymFiles[i].exists());
+        }
+
+        runner.ensureGreen();
+
+        {
+            DeleteSnapshotResponse response = client.admin().cluster()
+                    .prepareDeleteSnapshot(repositoryName, snapshotName)
+                    .execute().actionGet();
+            assertTrue(response.isAcknowledged());
+        }
+
+        runner.flush();
+
+        try (CurlResponse response = Curl.get(runner.node(),
+                "/_snapshot/" + repositoryName + "/_all").execute()) {
+            Map<String, Object> map = response.getContentAsMap();
+            List<Object> snapshots = (List<Object>) map.get("snapshots");
+            assertEquals(0, snapshots.size());
         }
 
     }

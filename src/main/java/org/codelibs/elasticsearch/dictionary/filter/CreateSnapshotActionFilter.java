@@ -15,7 +15,7 @@ import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.snapshots.SnapshotInfo;
 
-public class SnapshotActionFilter extends AbstractComponent implements
+public class CreateSnapshotActionFilter extends AbstractComponent implements
         ActionFilter {
 
     private int order;
@@ -23,7 +23,7 @@ public class SnapshotActionFilter extends AbstractComponent implements
     private DictionarySnapshotService dictionarySnapshotService;
 
     @Inject
-    public SnapshotActionFilter(final Settings settings) {
+    public CreateSnapshotActionFilter(final Settings settings) {
         super(settings);
 
         order = settings.getAsInt("indices.dictionary.filter.order", 1);

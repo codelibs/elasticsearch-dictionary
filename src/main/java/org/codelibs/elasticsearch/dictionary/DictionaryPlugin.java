@@ -2,8 +2,9 @@ package org.codelibs.elasticsearch.dictionary;
 
 import java.util.Collection;
 
-import org.codelibs.elasticsearch.dictionary.filter.RestoreActionFilter;
-import org.codelibs.elasticsearch.dictionary.filter.SnapshotActionFilter;
+import org.codelibs.elasticsearch.dictionary.filter.CreateSnapshotActionFilter;
+import org.codelibs.elasticsearch.dictionary.filter.DeleteSnapshotActionFilter;
+import org.codelibs.elasticsearch.dictionary.filter.RestoreSnapshotActionFilter;
 import org.codelibs.elasticsearch.dictionary.module.DictionaryModule;
 import org.elasticsearch.action.ActionModule;
 import org.elasticsearch.common.collect.Lists;
@@ -31,8 +32,9 @@ public class DictionaryPlugin extends AbstractPlugin {
     }
 
     public void onModule(final ActionModule module) {
-        module.registerFilter(SnapshotActionFilter.class);
-        module.registerFilter(RestoreActionFilter.class);
-    }
+        module.registerFilter(CreateSnapshotActionFilter.class);
+        module.registerFilter(RestoreSnapshotActionFilter.class);
+        module.registerFilter(DeleteSnapshotActionFilter.class);
+   }
 
 }

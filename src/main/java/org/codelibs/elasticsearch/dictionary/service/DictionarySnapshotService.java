@@ -14,9 +14,12 @@ import java.util.Queue;
 
 import org.codelibs.elasticsearch.dictionary.DictionaryConstants;
 import org.codelibs.elasticsearch.dictionary.DictionaryException;
-import org.codelibs.elasticsearch.dictionary.filter.SnapshotActionFilter;
+import org.codelibs.elasticsearch.dictionary.filter.CreateSnapshotActionFilter;
+import org.codelibs.elasticsearch.dictionary.filter.DeleteSnapshotActionFilter;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
+import org.elasticsearch.action.admin.cluster.snapshots.delete.DeleteSnapshotResponse;
+import org.elasticsearch.action.admin.cluster.snapshots.get.GetSnapshotsResponse;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexResponse;
@@ -41,6 +44,7 @@ import org.elasticsearch.index.service.IndexService;
 import org.elasticsearch.index.settings.IndexSettingsService;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.snapshots.SnapshotInfo;
+import org.elasticsearch.snapshots.SnapshotMissingException;
 import org.elasticsearch.snapshots.SnapshotsService;
 import org.elasticsearch.snapshots.SnapshotsService.CreateSnapshotListener;
 import org.elasticsearch.snapshots.SnapshotsService.SnapshotRequest;
@@ -80,14 +84,69 @@ public class DictionarySnapshotService extends AbstractComponent {
                 TimeValue.timeValueSeconds(30));
 
         for (final ActionFilter filter : filters.filters()) {
-            if (filter instanceof SnapshotActionFilter) {
-                ((SnapshotActionFilter) filter)
+            if (filter instanceof CreateSnapshotActionFilter) {
+                ((CreateSnapshotActionFilter) filter)
                         .setDictionarySnapshotService(this);
                 if (logger.isDebugEnabled()) {
-                    logger.debug("Set SnapshotActionFilter to " + filter);
+                    logger.debug("Set CreateSnapshotActionFilter to " + filter);
+                }
+            } else if (filter instanceof DeleteSnapshotActionFilter) {
+                ((DeleteSnapshotActionFilter) filter)
+                        .setDictionarySnapshotService(this);
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Set DeleteSnapshotActionFilter to " + filter);
                 }
             }
         }
+    }
+
+    public void deleteDictionarySnapshot(final String repository,
+            final String snapshot, final ActionListener<Void> listener) {
+        final String dictionarySnapshot = snapshot + dictionaryIndex + "_"
+                + repository + "_" + snapshot;
+        client.admin().cluster().prepareGetSnapshots(repository)
+                .setSnapshots(dictionarySnapshot)
+                .execute(new ActionListener<GetSnapshotsResponse>() {
+
+                    @Override
+                    public void onResponse(GetSnapshotsResponse response) {
+                        client.admin()
+                                .cluster()
+                                .prepareDeleteSnapshot(repository,
+                                        dictionarySnapshot)
+                                .setMasterNodeTimeout(masterNodeTimeout)
+                                .execute(
+                                        new ActionListener<DeleteSnapshotResponse>() {
+
+                                            @Override
+                                            public void onResponse(
+                                                    DeleteSnapshotResponse response) {
+                                                if (logger.isDebugEnabled()) {
+                                                    logger.debug(
+                                                            "Deleted {} snapshot.",
+                                                            dictionarySnapshot);
+                                                }
+                                                listener.onResponse(null);
+                                            }
+
+                                            @Override
+                                            public void onFailure(Throwable e) {
+                                                listener.onFailure(e);
+                                            }
+                                        });
+                    }
+
+                    @Override
+                    public void onFailure(Throwable e) {
+                        if (e instanceof SnapshotMissingException) {
+                            listener.onResponse(null);
+                        } else {
+                            listener.onFailure(new DictionaryException(
+                                    "Failed to find " + dictionarySnapshot
+                                            + " snapshot.", e));
+                        }
+                    }
+                });
     }
 
     public void createDictionarySnapshot(final SnapshotId snapshotId,
