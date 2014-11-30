@@ -9,10 +9,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.UnsupportedEncodingException;
+import java.util.List;
+import java.util.Map;
 
 import junit.framework.TestCase;
 
 import org.codelibs.elasticsearch.runner.ElasticsearchClusterRunner;
+import org.codelibs.elasticsearch.runner.net.Curl;
+import org.codelibs.elasticsearch.runner.net.CurlResponse;
 import org.elasticsearch.action.admin.cluster.snapshots.create.CreateSnapshotResponse;
 import org.elasticsearch.action.admin.cluster.snapshots.restore.RestoreSnapshotResponse;
 import org.elasticsearch.action.index.IndexResponse;
@@ -182,7 +186,21 @@ public class DictionaryPluginTest extends TestCase {
             assertEquals(0, snapshotInfo.failedShards());
         }
 
-        Thread.sleep(5000); // TODO
+        int count = 0;
+        int size = 0;
+        do {
+            Thread.sleep(1000);
+            try (CurlResponse response = Curl.get(runner.node(),
+                    "/_snapshot/" + repositoryName + "/_all").execute()) {
+                Map<String, Object> map = response.getContentAsMap();
+                List<Object> snapshots = (List<Object>) map.get("snapshots");
+                size = snapshots.size();
+            }
+            if (count > 20) {
+                throw new IllegalStateException("count is over");
+            }
+            count++;
+        } while (size != 2);
 
         runner.deleteIndex(index);
         runner.flush();
