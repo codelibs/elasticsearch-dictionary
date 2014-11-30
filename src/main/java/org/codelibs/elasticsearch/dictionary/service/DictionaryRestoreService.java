@@ -2,6 +2,7 @@ package org.codelibs.elasticsearch.dictionary.service;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.util.HashSet;
 import java.util.Map;
@@ -17,13 +18,21 @@ import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.IndicesOptions;
+import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.cluster.ClusterService;
+import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.SnapshotId;
+import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.collect.ImmutableList;
+import org.elasticsearch.common.collect.UnmodifiableIterator;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
@@ -36,28 +45,45 @@ import org.elasticsearch.snapshots.RestoreInfo;
 import org.elasticsearch.snapshots.RestoreService;
 import org.elasticsearch.snapshots.RestoreService.RestoreRequest;
 import org.elasticsearch.snapshots.SnapshotInfo;
+import org.elasticsearch.threadpool.ThreadPool;
+import org.elasticsearch.transport.BaseTransportRequestHandler;
+import org.elasticsearch.transport.TransportChannel;
+import org.elasticsearch.transport.TransportException;
+import org.elasticsearch.transport.TransportRequest;
+import org.elasticsearch.transport.TransportResponseHandler;
+import org.elasticsearch.transport.TransportService;
 
 public class DictionaryRestoreService extends AbstractComponent {
 
-    private RestoreService restoreService;
+    public static final String ACTION_RESTORE_DICTIONERY = "internal:index/dictionary/restore";
+
+    private Client client;
 
     private Environment env;
 
-    private String dictionaryIndex;
+    private ClusterService clusterService;
 
-    private Client client;
+    private RestoreService restoreService;
+
+    private String dictionaryIndex;
 
     private TimeValue masterNodeTimeout;
 
     private int maxNumOfDictionaries;
 
+    private TransportService transportService;
+
     @Inject
     public DictionaryRestoreService(final Settings settings,
             final Client client, final Environment env,
+            final ClusterService clusterService,
+            final TransportService transportService,
             final RestoreService restoreService, final ActionFilters filters) {
         super(settings);
         this.client = client;
         this.env = env;
+        this.clusterService = clusterService;
+        this.transportService = transportService;
         this.restoreService = restoreService;
 
         dictionaryIndex = settings.get("dictionary.index", ".dictionary");
@@ -76,6 +102,9 @@ public class DictionaryRestoreService extends AbstractComponent {
                 }
             }
         }
+
+        transportService.registerHandler(ACTION_RESTORE_DICTIONERY,
+                new RestoreDictionaryRequestHandler());
     }
 
     public void restoreDictionarySnapshot(final String repository,
@@ -187,77 +216,51 @@ public class DictionaryRestoreService extends AbstractComponent {
     private void restoreIndexFiles(final String[] indices,
             final String[] dictionaryIndices,
             final ActionListener<Void> listener) {
-        client.prepareSearch(dictionaryIndices)
-                .setQuery(QueryBuilders.matchAllQuery())
-                .setSize(maxNumOfDictionaries)
-                .setFrom(0)
-                .addFields(DictionaryConstants.PATH_FIELD,
-                        DictionaryConstants.ABSOLUTE_PATH_FIELD,
-                        DictionaryConstants.DATA_FIELD)
-                .execute(new ActionListener<SearchResponse>() {
+        final ClusterState state = clusterService.state();
+        final DiscoveryNodes nodes = state.nodes();
+        final UnmodifiableIterator<DiscoveryNode> nodesIt = nodes.dataNodes()
+                .valuesIt();
+        restoreIndexFile(nodesIt, dictionaryIndices, listener);
+    }
 
-                    @Override
-                    public void onResponse(final SearchResponse response) {
-                        final SearchHits hits = response.getHits();
-                        if (hits.hits().length != hits.getTotalHits()) {
-                            logger.warn(
-                                    "{} dictionary files are found, but there are {} files. "
-                                            + "{} dictionary files are ignored.",
-                                    hits.hits().length, hits.getTotalHits(),
-                                    hits.getTotalHits() - hits.hits().length);
+    private void restoreIndexFile(
+            final UnmodifiableIterator<DiscoveryNode> nodesIt,
+            final String[] dictionaryIndices,
+            final ActionListener<Void> listener) {
+        if (!nodesIt.hasNext()) {
+            listener.onResponse(null);
+            for (final String index : dictionaryIndices) {
+                deleteDictionaryIndex(index);
+            }
+        } else {
+            final DiscoveryNode node = nodesIt.next();
+            transportService.sendRequest(node, ACTION_RESTORE_DICTIONERY,
+                    new RestoreDictionaryRequest(dictionaryIndices),
+                    new TransportResponseHandler<RestoreDictionaryResponse>() {
+
+                        @Override
+                        public RestoreDictionaryResponse newInstance() {
+                            return new RestoreDictionaryResponse();
                         }
 
-                        final Set<String> indices = new HashSet<String>();
-                        for (final SearchHit hit : hits.hits()) {
-                            indices.add(hit.getType());
-
-                            final Map<String, SearchHitField> fields = hit
-                                    .getFields();
-
-                            final SearchHitField dataField = fields
-                                    .get(DictionaryConstants.DATA_FIELD);
-                            final BytesReference data = dataField.getValue();
-
-                            final SearchHitField absolutePathField = fields
-                                    .get(DictionaryConstants.ABSOLUTE_PATH_FIELD);
-                            final String absolutePath = absolutePathField
-                                    .getValue();
-                            if (!writeDictionaryFile(data, absolutePath)) {
-                                final SearchHitField pathField = fields
-                                        .get(DictionaryConstants.PATH_FIELD);
-                                final String path = pathField.getValue();
-                                if (logger.isDebugEnabled()) {
-                                    logger.debug(
-                                            "Failed to write {}. Retry to $ES_CONF/{}.",
-                                            absolutePath, path);
-                                }
-                                final File file = new File(env.configFile(),
-                                        path);
-                                if (!writeDictionaryFile(data,
-                                        file.getAbsolutePath())) {
-                                    logger.warn(
-                                            "Failed to write {} dictionary file.",
-                                            file.getAbsolutePath());
-                                }
-                            }
+                        @Override
+                        public void handleResponse(
+                                final RestoreDictionaryResponse response) {
+                            restoreIndexFile(nodesIt, dictionaryIndices,
+                                    listener);
                         }
 
-                        for (final String index : dictionaryIndices) {
-                            deleteDictionaryIndex(index);
+                        @Override
+                        public void handleException(final TransportException exp) {
+                            listener.onFailure(exp);
                         }
 
-                        listener.onResponse(null);
-                    }
-
-                    @Override
-                    public void onFailure(final Throwable e) {
-                        listener.onFailure(new DictionaryException(
-                                "Failed to restore dictionaries.", e));
-                        for (final String index : dictionaryIndices) {
-                            deleteDictionaryIndex(index);
+                        @Override
+                        public String executor() {
+                            return ThreadPool.Names.SNAPSHOT;
                         }
-                    }
-                });
+                    });
+        }
     }
 
     private boolean writeDictionaryFile(final BytesReference data,
@@ -298,4 +301,183 @@ public class DictionaryRestoreService extends AbstractComponent {
                 });
     }
 
+    class RestoreDictionaryRequestHandler extends
+            BaseTransportRequestHandler<RestoreDictionaryRequest> {
+
+        @Override
+        public RestoreDictionaryRequest newInstance() {
+            return new RestoreDictionaryRequest();
+        }
+
+        @Override
+        public void messageReceived(final RestoreDictionaryRequest request,
+                final TransportChannel channel) throws Exception {
+            client.prepareSearch(request.indices())
+                    .setQuery(QueryBuilders.matchAllQuery())
+                    .setSize(maxNumOfDictionaries)
+                    .setFrom(0)
+                    .addFields(DictionaryConstants.PATH_FIELD,
+                            DictionaryConstants.ABSOLUTE_PATH_FIELD,
+                            DictionaryConstants.DATA_FIELD)
+                    .execute(new ActionListener<SearchResponse>() {
+
+                        @Override
+                        public void onResponse(final SearchResponse response) {
+                            final SearchHits hits = response.getHits();
+                            if (hits.hits().length != hits.getTotalHits()) {
+                                logger.warn(
+                                        "{} dictionary files are found, but there are {} files. "
+                                                + "{} dictionary files are ignored.",
+                                        hits.hits().length,
+                                        hits.getTotalHits(),
+                                        hits.getTotalHits()
+                                                - hits.hits().length);
+                            }
+
+                            final Set<String> indices = new HashSet<String>();
+                            for (final SearchHit hit : hits.hits()) {
+                                indices.add(hit.getType());
+
+                                final Map<String, SearchHitField> fields = hit
+                                        .getFields();
+
+                                final SearchHitField dataField = fields
+                                        .get(DictionaryConstants.DATA_FIELD);
+                                final BytesReference data = dataField
+                                        .getValue();
+
+                                final SearchHitField absolutePathField = fields
+                                        .get(DictionaryConstants.ABSOLUTE_PATH_FIELD);
+                                final String absolutePath = absolutePathField
+                                        .getValue();
+
+                                final SearchHitField pathField = fields
+                                        .get(DictionaryConstants.PATH_FIELD);
+                                final String path = pathField.getValue();
+
+                                if (!path.startsWith("/")) {
+                                    final File file = new File(
+                                            env.configFile(), path);
+                                    if (!writeDictionaryFile(data,
+                                            file.getAbsolutePath())) {
+                                        logger.warn(
+                                                "Failed to write {} dictionary file.",
+                                                file.getAbsolutePath());
+                                    }
+                                } else if (!writeDictionaryFile(data,
+                                        absolutePath)) {
+                                    if (logger.isDebugEnabled()) {
+                                        logger.debug(
+                                                "Failed to write {}. Retry to $ES_CONF/{}.",
+                                                absolutePath, path);
+                                    }
+                                    final File file = new File(
+                                            env.configFile(), path);
+                                    if (!writeDictionaryFile(data,
+                                            file.getAbsolutePath())) {
+                                        logger.warn(
+                                                "Failed to write {} dictionary file.",
+                                                file.getAbsolutePath());
+                                    }
+                                }
+                            }
+
+                            sendResponse(channel, true, null);
+                        }
+
+                        @Override
+                        public void onFailure(final Throwable e) {
+                            sendResponse(channel, false, e.getMessage());
+                            if (logger.isDebugEnabled()) {
+                                logger.debug(
+                                        "Failed to restore dictionary files.",
+                                        e);
+                            }
+                        }
+
+                        private void sendResponse(
+                                final TransportChannel channel,
+                                final boolean acknowledged, final String message) {
+                            try {
+                                channel.sendResponse(new RestoreDictionaryResponse(
+                                        acknowledged, message));
+                            } catch (final IOException e) {
+                                try {
+                                    channel.sendResponse(new RestoreDictionaryResponse(
+                                            false, e.getMessage()));
+                                } catch (final IOException e1) {
+                                    logger.error("Failed to send a response.",
+                                            e);
+                                }
+                            }
+                        }
+
+                    });
+
+        }
+
+        @Override
+        public String executor() {
+            return ThreadPool.Names.SNAPSHOT;
+        }
+    }
+
+    public static class RestoreDictionaryRequest extends TransportRequest {
+
+        private String[] indices;
+
+        RestoreDictionaryRequest() {
+        }
+
+        RestoreDictionaryRequest(final String[] indices) {
+            this.indices = indices;
+        }
+
+        public String[] indices() {
+            return indices;
+        }
+
+        @Override
+        public void readFrom(final StreamInput in) throws IOException {
+            super.readFrom(in);
+            indices = in.readStringArray();
+        }
+
+        @Override
+        public void writeTo(final StreamOutput out) throws IOException {
+            super.writeTo(out);
+            out.writeStringArray(indices);
+        }
+    }
+
+    private static class RestoreDictionaryResponse extends AcknowledgedResponse {
+        String message;
+
+        RestoreDictionaryResponse() {
+        }
+
+        RestoreDictionaryResponse(final boolean acknowledged,
+                final String message) {
+            super(acknowledged);
+            this.message = message;
+        }
+
+        @Override
+        public void readFrom(final StreamInput in) throws IOException {
+            super.readFrom(in);
+            readAcknowledged(in);
+            if (!isAcknowledged()) {
+                message = in.readString();
+            }
+        }
+
+        @Override
+        public void writeTo(final StreamOutput out) throws IOException {
+            super.writeTo(out);
+            writeAcknowledged(out);
+            if (!isAcknowledged()) {
+                out.writeString(message);
+            }
+        }
+    }
 }
