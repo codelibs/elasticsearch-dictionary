@@ -11,6 +11,7 @@ Installing this plugin, elasticsearch is able to create/restore a snapshot with 
 | Version   | Elasticsearch |
 |:---------:|:-------------:|
 | master    | 1.4.X         |
+| 1.4.0     | 1.4.1         |
 
 ### Issues/Questions
 
@@ -21,11 +22,19 @@ Please file an [issue](https://github.com/codelibs/elasticsearch-dictionary/issu
 
 ### Install Dictionary Plugin
 
-TBD..
-
     $ $ES_HOME/bin/plugin --install org.codelibs/elasticsearch-dictionary/1.4.0
 
-## Getting Started
+## References
 
-TBD...
+### Snapshot/Restore With Dictionary
+
+A default Elasticsearch's Snapshot/Restore does not contain dictionary files.
+However, if the dictionary files does not exist, Elasticsearch does not work when starting or opening an index.
+
+In this plugin, an extended Snapshot/Restore feature is provided.
+This plugin finds dictionary files in an index setting and then creates an additional snapshot for storing the dictionary files automatically.
+Moreover, for restoring the snapshot, the dictionary files are restored when restoring the target snapshot.
+If installing this plugin, the above will work automatically.
+
+
 
