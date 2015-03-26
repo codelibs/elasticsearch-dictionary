@@ -159,7 +159,8 @@ public class DictionaryRestoreService extends AbstractComponent {
                 "restore dictionary snapshot[" + dictionarySnapshot + "]",
                 repository, dictionarySnapshot, Strings.EMPTY_ARRAY,
                 IndicesOptions.strictExpandOpen(), null, null,
-                ImmutableSettings.EMPTY, masterNodeTimeout, false, false, false);
+                ImmutableSettings.EMPTY, masterNodeTimeout, false, false,
+                false, ImmutableSettings.EMPTY, Strings.EMPTY_ARRAY);
         restoreService.restoreSnapshot(request,
                 new ActionListener<RestoreInfo>() {
                     @Override
