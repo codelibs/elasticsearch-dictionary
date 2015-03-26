@@ -10,7 +10,8 @@ Installing this plugin, elasticsearch is able to create/restore a snapshot with 
 
 | Version   | Elasticsearch |
 |:---------:|:-------------:|
-| master    | 1.4.X         |
+| master    | 1.5.X         |
+| 1.5.0     | 1.5.0         |
 | 1.4.0     | 1.4.1         |
 
 ### Issues/Questions
@@ -22,7 +23,7 @@ Please file an [issue](https://github.com/codelibs/elasticsearch-dictionary/issu
 
 ### Install Dictionary Plugin
 
-    $ $ES_HOME/bin/plugin --install org.codelibs/elasticsearch-dictionary/1.4.0
+    $ $ES_HOME/bin/plugin --install org.codelibs/elasticsearch-dictionary/1.5.0
 
 ## References
 
