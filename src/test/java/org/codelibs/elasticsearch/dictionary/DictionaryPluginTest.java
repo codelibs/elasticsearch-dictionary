@@ -11,6 +11,7 @@ import java.io.OutputStreamWriter;
 import java.io.UnsupportedEncodingException;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import junit.framework.TestCase;
 
@@ -58,11 +59,10 @@ public class DictionaryPluginTest extends TestCase {
             public void build(final int number, final Builder settingsBuilder) {
                 settingsBuilder.put("http.cors.enabled", true);
                 settingsBuilder.put("index.number_of_replicas", 1);
+                settingsBuilder.put("path.repo", repositoryDir.getAbsolutePath());
             }
-        }).build(
-                newConfigs()
-                        .clusterName("es-dict-" + System.currentTimeMillis())
-                        .numOfNode(numOfNode).ramIndexStore());
+        }).build(newConfigs().clusterName(UUID.randomUUID().toString())
+                .numOfNode(numOfNode).ramIndexStore());
         runner.ensureGreen();
 
         Node node = runner.node();
