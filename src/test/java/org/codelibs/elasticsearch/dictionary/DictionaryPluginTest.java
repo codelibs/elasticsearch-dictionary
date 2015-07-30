@@ -60,6 +60,7 @@ public class DictionaryPluginTest extends TestCase {
                 settingsBuilder.put("http.cors.enabled", true);
                 settingsBuilder.put("index.number_of_replicas", 1);
                 settingsBuilder.put("path.repo", repositoryDir.getAbsolutePath());
+                settingsBuilder.put("index.unassigned.node_left.delayed_timeout", "0");
             }
         }).build(newConfigs().clusterName(UUID.randomUUID().toString())
                 .numOfNode(numOfNode).ramIndexStore());
