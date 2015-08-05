@@ -9,6 +9,7 @@ import org.elasticsearch.action.admin.cluster.snapshots.create.CreateSnapshotReq
 import org.elasticsearch.action.admin.cluster.snapshots.create.CreateSnapshotResponse;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilterChain;
+import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.metadata.SnapshotId;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
@@ -22,9 +23,12 @@ public class CreateSnapshotActionFilter extends AbstractComponent implements
 
     private DictionarySnapshotService dictionarySnapshotService;
 
+    private ClusterService clusterService;
+
     @Inject
-    public CreateSnapshotActionFilter(final Settings settings) {
+    public CreateSnapshotActionFilter(final Settings settings, final ClusterService clusterService) {
         super(settings);
+        this.clusterService = clusterService;
 
         order = settings.getAsInt("indices.dictionary.filter.order", 1);
     }
@@ -59,7 +63,7 @@ public class CreateSnapshotActionFilter extends AbstractComponent implements
     public void apply(final String action, final ActionResponse response,
             @SuppressWarnings("rawtypes") final ActionListener listener,
             final ActionFilterChain chain) {
-        if (!CreateSnapshotAction.NAME.equals(action)) {
+        if (!CreateSnapshotAction.NAME.equals(action) || !clusterService.state().nodes().localNodeMaster()) {
             chain.proceed(action, response, listener);
         } else {
             final CreateSnapshotResponse createSnapshotResponse = (CreateSnapshotResponse) response;
