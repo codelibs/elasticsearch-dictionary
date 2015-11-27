@@ -16,6 +16,7 @@ import org.codelibs.elasticsearch.dictionary.DictionaryConstants;
 import org.codelibs.elasticsearch.dictionary.DictionaryException;
 import org.codelibs.elasticsearch.dictionary.filter.CreateSnapshotActionFilter;
 import org.codelibs.elasticsearch.dictionary.filter.DeleteSnapshotActionFilter;
+import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.snapshots.delete.DeleteSnapshotResponse;
@@ -27,12 +28,19 @@ import org.elasticsearch.action.admin.indices.flush.FlushResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilters;
+import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.cluster.ClusterService;
+import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.SnapshotId;
+import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.bytes.ChannelBufferBytesReference;
 import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -46,10 +54,19 @@ import org.elasticsearch.snapshots.SnapshotMissingException;
 import org.elasticsearch.snapshots.SnapshotsService;
 import org.elasticsearch.snapshots.SnapshotsService.CreateSnapshotListener;
 import org.elasticsearch.snapshots.SnapshotsService.SnapshotRequest;
+import org.elasticsearch.threadpool.ThreadPool;
+import org.elasticsearch.transport.TransportChannel;
+import org.elasticsearch.transport.TransportException;
+import org.elasticsearch.transport.TransportRequest;
+import org.elasticsearch.transport.TransportRequestHandler;
+import org.elasticsearch.transport.TransportResponseHandler;
+import org.elasticsearch.transport.TransportService;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 
 public class DictionarySnapshotService extends AbstractComponent {
+
+    private static final String ACTION_DICTIONARY_SNAPSHOT_DELETE = "internal:cluster/snapshot/delete_dictionary";
 
     private SnapshotsService snapshotsService;
 
@@ -65,15 +82,20 @@ public class DictionarySnapshotService extends AbstractComponent {
 
     private TimeValue masterNodeTimeout;
 
+    private TransportService transportService;
+
+    private ClusterService clusterService;
+
     @Inject
-    public DictionarySnapshotService(final Settings settings,
-            final Client client, final Environment env,
-            final IndicesService indicesService,
+    public DictionarySnapshotService(final Settings settings, final Client client, final Environment env,
+            final ClusterService clusterService, final IndicesService indicesService, final TransportService transportService,
             final SnapshotsService snapshotsService, final ActionFilters filters) {
         super(settings);
         this.client = client;
         this.env = env;
+        this.clusterService = clusterService;
         this.indicesService = indicesService;
+        this.transportService = transportService;
         this.snapshotsService = snapshotsService;
 
         dictionaryIndex = settings.get("dictionary.index", ".dictionary");
@@ -98,10 +120,56 @@ public class DictionarySnapshotService extends AbstractComponent {
                 }
             }
         }
+
+        transportService.registerRequestHandler(ACTION_DICTIONARY_SNAPSHOT_DELETE,
+                DeleteDictionaryRequest.class, ThreadPool.Names.SNAPSHOT,
+                new DeleteDictionaryRequestHandler());
     }
 
-    public void deleteDictionarySnapshot(final String repository,
-            final String snapshot, final ActionListener<Void> listener) {
+    private DiscoveryNode getMasterNode() {
+        final ClusterState clusterState = clusterService.state();
+        final DiscoveryNodes nodes = clusterState.nodes();
+        return nodes.localNodeMaster() ? null : nodes.masterNode();
+    }
+
+    public void deleteDictionarySnapshot(final String repository, final String snapshot, final ActionListener<Void> listener) {
+        DiscoveryNode masterNode = getMasterNode();
+        if (masterNode == null) {
+            deleteDictionarySnapshotOnMaster(repository, snapshot, listener);
+        } else {
+            transportService.sendRequest(masterNode, ACTION_DICTIONARY_SNAPSHOT_DELETE, new DeleteDictionaryRequest(repository,snapshot),
+                    new TransportResponseHandler<DeleteDictionaryResponse>() {
+
+                        @Override
+                        public DeleteDictionaryResponse newInstance() {
+                             return new DeleteDictionaryResponse();
+                        }
+
+                        @Override
+                        public void handleResponse(DeleteDictionaryResponse response) {
+                            if (response.isAcknowledged()) {
+                                listener.onResponse(null);
+                            } else {
+                                listener.onFailure(new DictionaryException("Could not delete " + repository + ":" + snapshot + ". "
+                                        + response.message));
+                            }
+                        }
+
+                        @Override
+                        public void handleException(TransportException exp) {
+                            listener.onFailure(exp);
+                        }
+
+                        @Override
+                        public String executor() {
+                            return ThreadPool.Names.GENERIC;
+                        }
+                    });
+        }
+    }
+
+    public void deleteDictionarySnapshotOnMaster(final String repository,
+                final String snapshot, final ActionListener<Void> listener) {
         final String dictionarySnapshot = snapshot + dictionaryIndex + "_"
                 + repository + "_" + snapshot;
         client.admin().cluster().prepareGetSnapshots(repository)
@@ -327,8 +395,7 @@ public class DictionarySnapshotService extends AbstractComponent {
                 });
     }
 
-    private void createDictionarySnapshot(final String index,
-            final SnapshotId snapshotId, final ActionListener<Void> listener) {
+    private void createDictionarySnapshot(final String index, final SnapshotId snapshotId, final ActionListener<Void> listener) {
         final String repository = snapshotId.getRepository();
         final String snapshot = snapshotId.getSnapshot();
         final String name = snapshot + index;
@@ -533,4 +600,94 @@ public class DictionarySnapshotService extends AbstractComponent {
         return false;
     }
 
+    class DeleteDictionaryRequestHandler
+            implements TransportRequestHandler<DeleteDictionaryRequest> {
+
+        @Override
+        public void messageReceived(final DeleteDictionaryRequest request, final TransportChannel channel) throws Exception {
+            deleteDictionarySnapshotOnMaster(request.repository, request.snapshot, new ActionListener<Void>() {
+
+                @Override
+                public void onResponse(Void response) {
+                    try {
+                        channel.sendResponse(new DeleteDictionaryResponse(true));
+                    } catch (IOException e) {
+                        throw ExceptionsHelper.convertToRuntime(e);
+                    }
+                }
+
+                @Override
+                public void onFailure(Throwable e) {
+                    try {
+                        channel.sendResponse(new DeleteDictionaryResponse(false, e.getMessage()));
+                    } catch (IOException e1) {
+                        throw ExceptionsHelper.convertToRuntime(e);
+                    }
+                }
+            });
+        }
+    }
+
+    private static class DeleteDictionaryRequest extends TransportRequest {
+
+        private String repository;
+        private String snapshot;
+
+        DeleteDictionaryRequest() {
+        }
+
+        DeleteDictionaryRequest(String repository, String snapshot) {
+            this.repository = repository;
+            this.snapshot = snapshot;
+        }
+
+        @Override
+        public void readFrom(final StreamInput in) throws IOException {
+            super.readFrom(in);
+            repository = in.readString();
+            snapshot = in.readString();
+        }
+
+        @Override
+        public void writeTo(final StreamOutput out) throws IOException {
+            super.writeTo(out);
+            out.writeString(repository);
+            out.writeString(snapshot);
+        }
+    }
+
+    private static class DeleteDictionaryResponse extends AcknowledgedResponse {
+
+        private String message;
+
+        DeleteDictionaryResponse() {
+        }
+
+        DeleteDictionaryResponse(final boolean acknowledged) {
+            super(acknowledged);
+        }
+
+        DeleteDictionaryResponse(final boolean acknowledged, final String message) {
+            super(acknowledged);
+            this.message = message;
+        }
+
+        @Override
+        public void readFrom(final StreamInput in) throws IOException {
+            super.readFrom(in);
+            readAcknowledged(in);
+            if (!isAcknowledged()) {
+                message = in.readString();
+            }
+        }
+
+        @Override
+        public void writeTo(final StreamOutput out) throws IOException {
+            super.writeTo(out);
+            writeAcknowledged(out);
+            if (!isAcknowledged()) {
+                out.writeString(message);
+            }
+        }
+    }
 }

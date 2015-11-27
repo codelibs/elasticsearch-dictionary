@@ -8,6 +8,7 @@ import org.elasticsearch.action.admin.cluster.snapshots.restore.RestoreSnapshotA
 import org.elasticsearch.action.admin.cluster.snapshots.restore.RestoreSnapshotRequest;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilterChain;
+import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
@@ -19,9 +20,12 @@ public class RestoreSnapshotActionFilter extends AbstractComponent implements
 
     private DictionaryRestoreService dictionaryRestoreService;
 
+    private ClusterService clusterService;
+
     @Inject
-    public RestoreSnapshotActionFilter(final Settings settings) {
+    public RestoreSnapshotActionFilter(final Settings settings, final ClusterService clusterService) {
         super(settings);
+        this.clusterService = clusterService;
 
         order = settings.getAsInt("indices.dictionary.filter.order", 1);
     }
@@ -41,7 +45,7 @@ public class RestoreSnapshotActionFilter extends AbstractComponent implements
             @SuppressWarnings("rawtypes") final ActionRequest request,
             @SuppressWarnings("rawtypes") final ActionListener listener,
             final ActionFilterChain chain) {
-        if (!RestoreSnapshotAction.NAME.equals(action)) {
+        if (!RestoreSnapshotAction.NAME.equals(action) || !clusterService.state().nodes().localNodeMaster()) {
             chain.proceed(action, request, listener);
         } else {
             final RestoreSnapshotRequest restoreSnapshotRequest = (RestoreSnapshotRequest) request;

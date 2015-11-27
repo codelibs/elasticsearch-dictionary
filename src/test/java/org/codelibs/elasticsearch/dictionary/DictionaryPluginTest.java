@@ -68,6 +68,7 @@ public class DictionaryPluginTest extends TestCase {
                 settingsBuilder.put("plugin.types", "org.codelibs.elasticsearch.dictionary.DictionaryPlugin,org.elasticsearch.plugin.analysis.kuromoji.AnalysisKuromojiPlugin");
                 settingsBuilder.put("configsync.flush_interval", "1m");
                 settingsBuilder.put("path.repo", repositoryDir.getAbsolutePath());
+                settingsBuilder.put("index.unassigned.node_left.delayed_timeout", "0");
             }
         }).build(newConfigs().clusterName(UUID.randomUUID().toString())
                 .numOfNode(numOfNode).clusterName(clusterName));
@@ -121,137 +122,136 @@ public class DictionaryPluginTest extends TestCase {
         String index = "sample";
         String type = "data";
 
-        // create an index
-        final String indexSettings = "{\"index\":{\"analysis\":{"
-                + "\"tokenizer\":{"//
-                + "\"kuromoji_user_dict\":{\"type\":\"kuromoji_tokenizer\",\"mode\":\"extended\",\"discard_punctuation\":\"false\",\"user_dictionary\":\"userdict_ja.txt\"}"
-                + "},"//
-                + "\"filter\":{"//
-                + "\"synonym\":{\"type\":\"synonym\",\"synonyms_path\":\"synonym.txt\"}"//
-                + "},"//
-                + "\"analyzer\":{"
-                + "\"my_analyzer\":{\"type\":\"custom\",\"tokenizer\":\"kuromoji_user_dict\",\"filter\":[\"synonym\"]}"
-                + "}"//
-                + "}}}";
-        runner.createIndex(index,
-                Settings.builder().loadFromSource(indexSettings)
-                        .build());
-        //               runner.createIndex(index, null);
-        runner.ensureYellow(index);
+        for (int j = 0; j < numOfNode; j++) {
+            Client client = runner.getNode(j).client();
 
-        // create a mapping
-        final XContentBuilder mappingBuilder = XContentFactory.jsonBuilder()//
-                .startObject()//
-                .startObject(type)//
-                .startObject("properties")//
+            // create an index
+            final String indexSettings =
+                    "{\"index\":{\"analysis\":{"
+                            + "\"tokenizer\":{"//
+                            + "\"kuromoji_user_dict\":{\"type\":\"kuromoji_tokenizer\",\"mode\":\"extended\",\"discard_punctuation\":\"false\",\"user_dictionary\":\"userdict_ja.txt\"}"
+                            + "},"//
+                            + "\"filter\":{"//
+                            + "\"synonym\":{\"type\":\"synonym\",\"synonyms_path\":\"synonym.txt\"}"//
+                            + "},"//
+                            + "\"analyzer\":{"
+                            + "\"my_analyzer\":{\"type\":\"custom\",\"tokenizer\":\"kuromoji_user_dict\",\"filter\":[\"synonym\"]}" + "}"//
+                            + "}}}";
+            runner.createIndex(index, Settings.builder().loadFromSource(indexSettings).build());
+            //               runner.createIndex(index, null);
+            runner.ensureYellow(index);
 
-                // id
-                .startObject("id")//
-                .field("type", "string")//
-                .field("index", "not_analyzed")//
-                .endObject()//
+            // create a mapping
+            final XContentBuilder mappingBuilder = XContentFactory.jsonBuilder()//
+                    .startObject()//
+                    .startObject(type)//
+                    .startObject("properties")//
 
-                // msg
-                .startObject("msg")//
-                .field("type", "string")//
-                .endObject()//
+                    // id
+                    .startObject("id")//
+                    .field("type", "string")//
+                    .field("index", "not_analyzed")//
+                    .endObject()//
 
-                // order
-                .startObject("order")//
-                .field("type", "long")//
-                .endObject()//
+                    // msg
+                    .startObject("msg")//
+                    .field("type", "string")//
+                    .endObject()//
 
-                // @timestamp
-                .startObject("@timestamp")//
-                .field("type", "date")//
-                .endObject()//
+                    // order
+                    .startObject("order")//
+                    .field("type", "long")//
+                    .endObject()//
 
-                .endObject()//
-                .endObject()//
-                .endObject();
-        runner.createMapping(index, type, mappingBuilder);
+                    // @timestamp
+                    .startObject("@timestamp")//
+                    .field("type", "date")//
+                    .endObject()//
 
-        // create 1000 documents
-        for (int i = 1; i <= 1000; i++) {
-            final IndexResponse indexResponse1 = runner.insert(index, type,
-                    String.valueOf(i), "{\"id\":\"" + i + "\",\"msg\":\"test "
-                            + i + "\",\"order\":" + i
-                            + ",\"@timestamp\":\"2000-01-01T00:00:00\"}");
-            assertTrue(indexResponse1.isCreated());
+                    .endObject()//
+                    .endObject()//
+                    .endObject();
+            runner.createMapping(index, type, mappingBuilder);
+
+            // create 1000 documents
+            for (int i = 1; i <= 1000; i++) {
+                final IndexResponse indexResponse1 =
+                        runner.insert(index, type, String.valueOf(i), "{\"id\":\"" + i + "\",\"msg\":\"test " + i + "\",\"order\":" + i
+                                + ",\"@timestamp\":\"2000-01-01T00:00:00\"}");
+                assertTrue(indexResponse1.isCreated());
+            }
+            runner.flush();
+
+            assertTrue(runner.indexExists(index));
+
+            String snapshotName = "snapshot";
+
+            {
+                CreateSnapshotResponse response =
+                        client.admin().cluster().prepareCreateSnapshot(repositoryName, snapshotName).setWaitForCompletion(true).execute()
+                                .actionGet();
+                SnapshotInfo snapshotInfo = response.getSnapshotInfo();
+                assertEquals(0, snapshotInfo.failedShards());
+            }
+
+            try (CurlResponse response = Curl.get(runner.node(), "/_snapshot/" + repositoryName + "/_all").execute()) {
+                Map<String, Object> map = response.getContentAsMap();
+                List<Object> snapshots = (List<Object>) map.get("snapshots");
+                assertEquals(2, snapshots.size());
+            }
+
+            runner.deleteIndex(index);
+            runner.flush();
+
+            assertFalse(runner.indexExists(index));
+
+            for (int i = 0; i < numOfNode; i++) {
+                userDictFiles[i].delete();
+                synonymFiles[i].delete();
+            }
+
+            for (int i = 0; i < numOfNode; i++) {
+                assertFalse(userDictFiles[i].exists());
+                assertFalse(synonymFiles[i].exists());
+            }
+
+            runner.ensureGreen();
+
+            {
+                RestoreSnapshotResponse response =
+                        client.admin().cluster().prepareRestoreSnapshot(repositoryName, snapshotName).setWaitForCompletion(true).execute()
+                                .actionGet();
+                RestoreInfo restoreInfo = response.getRestoreInfo();
+                assertEquals(0, restoreInfo.failedShards());
+            }
+
+            assertTrue(runner.indexExists(index));
+
+            for (int i = 0; i < numOfNode; i++) {
+                assertTrue(userDictFiles[i].exists());
+                assertTrue(synonymFiles[i].exists());
+            }
+
+            runner.ensureGreen();
+
+            {
+                DeleteSnapshotResponse response =
+                        client.admin().cluster().prepareDeleteSnapshot(repositoryName, snapshotName).execute().actionGet();
+                assertTrue(response.isAcknowledged());
+            }
+
+            runner.flush();
+
+            try (CurlResponse response = Curl.get(runner.node(), "/_snapshot/" + repositoryName + "/_all").execute()) {
+                Map<String, Object> map = response.getContentAsMap();
+                List<Object> snapshots = (List<Object>) map.get("snapshots");
+                assertEquals(0, snapshots.size());
+            }
+
+            runner.deleteIndex(index);
+
+            runner.flush();
         }
-        runner.flush();
-
-        assertTrue(runner.indexExists(index));
-
-        Client client = runner.client();
-
-        String snapshotName = "snapshot";
-
-        {
-            CreateSnapshotResponse response = client.admin().cluster()
-                    .prepareCreateSnapshot(repositoryName, snapshotName)
-                    .setWaitForCompletion(true).execute().actionGet();
-            SnapshotInfo snapshotInfo = response.getSnapshotInfo();
-            assertEquals(0, snapshotInfo.failedShards());
-        }
-
-        try (CurlResponse response = Curl.get(runner.node(),
-                "/_snapshot/" + repositoryName + "/_all").execute()) {
-            Map<String, Object> map = response.getContentAsMap();
-            List<Object> snapshots = (List<Object>) map.get("snapshots");
-            assertEquals(2, snapshots.size());
-        }
-
-        runner.deleteIndex(index);
-        runner.flush();
-
-        assertFalse(runner.indexExists(index));
-
-        for (int i = 0; i < numOfNode; i++) {
-            userDictFiles[i].delete();
-            synonymFiles[i].delete();
-        }
-
-        for (int i = 0; i < numOfNode; i++) {
-            assertFalse(userDictFiles[i].exists());
-            assertFalse(synonymFiles[i].exists());
-        }
-
-        runner.ensureGreen();
-
-        {
-            RestoreSnapshotResponse response = client.admin().cluster()
-                    .prepareRestoreSnapshot(repositoryName, snapshotName)
-                    .setWaitForCompletion(true).execute().actionGet();
-            RestoreInfo restoreInfo = response.getRestoreInfo();
-            assertEquals(0, restoreInfo.failedShards());
-        }
-
-        assertTrue(runner.indexExists(index));
-
-        for (int i = 0; i < numOfNode; i++) {
-            assertTrue(userDictFiles[i].exists());
-            assertTrue(synonymFiles[i].exists());
-        }
-
-        runner.ensureGreen();
-
-        {
-            DeleteSnapshotResponse response = client.admin().cluster()
-                    .prepareDeleteSnapshot(repositoryName, snapshotName)
-                    .execute().actionGet();
-            assertTrue(response.isAcknowledged());
-        }
-
-        runner.flush();
-
-        try (CurlResponse response = Curl.get(runner.node(),
-                "/_snapshot/" + repositoryName + "/_all").execute()) {
-            Map<String, Object> map = response.getContentAsMap();
-            List<Object> snapshots = (List<Object>) map.get("snapshots");
-            assertEquals(0, snapshots.size());
-        }
-
     }
 
     public void test_indexWithoutDictionaries() throws Exception {
