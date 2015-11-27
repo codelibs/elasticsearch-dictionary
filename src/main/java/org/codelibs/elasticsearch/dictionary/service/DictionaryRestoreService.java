@@ -5,6 +5,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -27,13 +28,10 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
-import org.elasticsearch.common.collect.ImmutableList;
-import org.elasticsearch.common.collect.UnmodifiableIterator;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.env.Environment;
@@ -47,12 +45,14 @@ import org.elasticsearch.snapshots.RestoreService.RestoreRequest;
 import org.elasticsearch.snapshots.SnapshotInfo;
 import org.elasticsearch.snapshots.SnapshotMissingException;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.transport.BaseTransportRequestHandler;
 import org.elasticsearch.transport.TransportChannel;
 import org.elasticsearch.transport.TransportException;
 import org.elasticsearch.transport.TransportRequest;
+import org.elasticsearch.transport.TransportRequestHandler;
 import org.elasticsearch.transport.TransportResponseHandler;
 import org.elasticsearch.transport.TransportService;
+
+import com.google.common.collect.UnmodifiableIterator;
 
 public class DictionaryRestoreService extends AbstractComponent {
 
@@ -104,7 +104,8 @@ public class DictionaryRestoreService extends AbstractComponent {
             }
         }
 
-        transportService.registerHandler(ACTION_RESTORE_DICTIONERY,
+        transportService.registerRequestHandler(ACTION_RESTORE_DICTIONERY,
+                RestoreDictionaryRequest.class, ThreadPool.Names.SNAPSHOT,
                 new RestoreDictionaryRequestHandler());
     }
 
@@ -119,7 +120,7 @@ public class DictionaryRestoreService extends AbstractComponent {
 
                     @Override
                     public void onResponse(final GetSnapshotsResponse response) {
-                        final ImmutableList<SnapshotInfo> snapshots = response
+                        final List<SnapshotInfo> snapshots = response
                                 .getSnapshots();
                         if (!snapshots.isEmpty()) {
                             if (logger.isDebugEnabled()) {
@@ -159,8 +160,8 @@ public class DictionaryRestoreService extends AbstractComponent {
                 "restore dictionary snapshot[" + dictionarySnapshot + "]",
                 repository, dictionarySnapshot, Strings.EMPTY_ARRAY,
                 IndicesOptions.strictExpandOpen(), null, null,
-                ImmutableSettings.EMPTY, masterNodeTimeout, false, false,
-                false, ImmutableSettings.EMPTY, Strings.EMPTY_ARRAY);
+                Settings.EMPTY, masterNodeTimeout, false, false,
+                false, Settings.EMPTY, Strings.EMPTY_ARRAY);
         restoreService.restoreSnapshot(request,
                 new ActionListener<RestoreInfo>() {
                     @Override
@@ -177,7 +178,7 @@ public class DictionaryRestoreService extends AbstractComponent {
                                                 .equals(restoreCompletionResponse
                                                         .getSnapshotId())) {
                                             try {
-                                                final ImmutableList<String> dictionaryIndices = restoreCompletionResponse
+                                                final List<String> dictionaryIndices = restoreCompletionResponse
                                                         .getRestoreInfo()
                                                         .indices();
                                                 if (logger.isDebugEnabled()) {
@@ -313,13 +314,8 @@ public class DictionaryRestoreService extends AbstractComponent {
                 });
     }
 
-    class RestoreDictionaryRequestHandler extends
-            BaseTransportRequestHandler<RestoreDictionaryRequest> {
-
-        @Override
-        public RestoreDictionaryRequest newInstance() {
-            return new RestoreDictionaryRequest();
-        }
+    class RestoreDictionaryRequestHandler
+            implements TransportRequestHandler<RestoreDictionaryRequest> {
 
         @Override
         public void messageReceived(final RestoreDictionaryRequest request,
@@ -368,8 +364,8 @@ public class DictionaryRestoreService extends AbstractComponent {
                                 final String path = pathField.getValue();
 
                                 if (!path.startsWith("/")) {
-                                    final File file = new File(
-                                            env.configFile(), path);
+                                    final File file = env.configFile()
+                                            .resolve(path).toFile();
                                     if (!writeDictionaryFile(data,
                                             file.getAbsolutePath())) {
                                         logger.warn(
@@ -383,8 +379,8 @@ public class DictionaryRestoreService extends AbstractComponent {
                                                 "Failed to write {}. Retry to $ES_CONF/{}.",
                                                 absolutePath, path);
                                     }
-                                    final File file = new File(
-                                            env.configFile(), path);
+                                    final File file = env.configFile()
+                                            .resolve(path).toFile();
                                     if (!writeDictionaryFile(data,
                                             file.getAbsolutePath())) {
                                         logger.warn(
@@ -426,11 +422,6 @@ public class DictionaryRestoreService extends AbstractComponent {
 
                     });
 
-        }
-
-        @Override
-        public String executor() {
-            return ThreadPool.Names.SNAPSHOT;
         }
     }
 

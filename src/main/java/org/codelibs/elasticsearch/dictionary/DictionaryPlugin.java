@@ -7,11 +7,12 @@ import org.codelibs.elasticsearch.dictionary.filter.DeleteSnapshotActionFilter;
 import org.codelibs.elasticsearch.dictionary.filter.RestoreSnapshotActionFilter;
 import org.codelibs.elasticsearch.dictionary.module.DictionaryModule;
 import org.elasticsearch.action.ActionModule;
-import org.elasticsearch.common.collect.Lists;
 import org.elasticsearch.common.inject.Module;
-import org.elasticsearch.plugins.AbstractPlugin;
+import org.elasticsearch.plugins.Plugin;
 
-public class DictionaryPlugin extends AbstractPlugin {
+import com.google.common.collect.Lists;
+
+public class DictionaryPlugin extends Plugin {
 
     @Override
     public String name() {
@@ -20,14 +21,14 @@ public class DictionaryPlugin extends AbstractPlugin {
 
     @Override
     public String description() {
-        return "This plugin manages dictionary files.";
+        return "This plugin provides a feature to manage dictionary files.";
     }
 
     @Override
-    public Collection<Class<? extends Module>> modules() {
-        final Collection<Class<? extends Module>> modules = Lists
+    public Collection<Module> nodeModules() {
+        final Collection<Module> modules = Lists
                 .newArrayList();
-        modules.add(DictionaryModule.class);
+        modules.add(new DictionaryModule());
         return modules;
     }
 

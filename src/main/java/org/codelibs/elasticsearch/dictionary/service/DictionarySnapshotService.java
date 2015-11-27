@@ -33,8 +33,6 @@ import org.elasticsearch.common.bytes.ChannelBufferBytesReference;
 import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.netty.buffer.ChannelBuffer;
-import org.elasticsearch.common.netty.buffer.ChannelBuffers;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -48,6 +46,8 @@ import org.elasticsearch.snapshots.SnapshotMissingException;
 import org.elasticsearch.snapshots.SnapshotsService;
 import org.elasticsearch.snapshots.SnapshotsService.CreateSnapshotListener;
 import org.elasticsearch.snapshots.SnapshotsService.SnapshotRequest;
+import org.jboss.netty.buffer.ChannelBuffer;
+import org.jboss.netty.buffer.ChannelBuffers;
 
 public class DictionarySnapshotService extends AbstractComponent {
 
@@ -508,8 +508,7 @@ public class DictionarySnapshotService extends AbstractComponent {
     private void addDictionaryFile(
             final List<Tuple<String, File>> dictionaryList, final String value) {
         if (!value.startsWith("/")) {
-            final File configFile = env.configFile();
-            final File dictFileInConf = new File(configFile, value);
+            final File dictFileInConf = env.configFile().resolve(value).toFile();
             if (dictFileInConf.exists()) {
                 dictionaryList.add(new Tuple<String, File>(value,
                         dictFileInConf));

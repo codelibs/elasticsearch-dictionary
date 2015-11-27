@@ -23,8 +23,8 @@ import org.elasticsearch.action.admin.cluster.snapshots.delete.DeleteSnapshotRes
 import org.elasticsearch.action.admin.cluster.snapshots.restore.RestoreSnapshotResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.client.Client;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.ImmutableSettings.Builder;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.settings.Settings.Builder;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.node.Node;
@@ -46,6 +46,8 @@ public class DictionaryPluginTest extends TestCase {
 
     private int numOfNode = 3;
 
+    private String clusterName;
+
     @Before
     public void setUp() throws Exception {
         repositoryDir = File.createTempFile("mysnapshot", "");
@@ -53,16 +55,22 @@ public class DictionaryPluginTest extends TestCase {
         repositoryDir.mkdirs();
         repositoryName = "myrepo";
 
+        clusterName = "es-dictionary-" + System.currentTimeMillis();
         runner = new ElasticsearchClusterRunner();
         runner.onBuild(new ElasticsearchClusterRunner.Builder() {
             @Override
             public void build(final int number, final Builder settingsBuilder) {
                 settingsBuilder.put("http.cors.enabled", true);
+                settingsBuilder.put("http.cors.allow-origin", "*");
                 settingsBuilder.put("index.number_of_replicas", 1);
+                settingsBuilder.put("index.number_of_shards", 3);
+                settingsBuilder.putArray("discovery.zen.ping.unicast.hosts", "localhost:9301-9310");
+                settingsBuilder.put("plugin.types", "org.codelibs.elasticsearch.dictionary.DictionaryPlugin,org.elasticsearch.plugin.analysis.kuromoji.AnalysisKuromojiPlugin");
+                settingsBuilder.put("configsync.flush_interval", "1m");
                 settingsBuilder.put("path.repo", repositoryDir.getAbsolutePath());
             }
         }).build(newConfigs().clusterName(UUID.randomUUID().toString())
-                .numOfNode(numOfNode).ramIndexStore());
+                .numOfNode(numOfNode).clusterName(clusterName));
         runner.ensureGreen();
 
         Node node = runner.node();
@@ -72,7 +80,7 @@ public class DictionaryPluginTest extends TestCase {
                 .preparePutRepository(repositoryName)
                 .setType("fs")
                 .setSettings(
-                        ImmutableSettings.settingsBuilder().put("location",
+                        Settings.settingsBuilder().put("location",
                                 repositoryDir.getAbsolutePath())).execute()
                 .actionGet();
 
@@ -126,7 +134,7 @@ public class DictionaryPluginTest extends TestCase {
                 + "}"//
                 + "}}}";
         runner.createIndex(index,
-                ImmutableSettings.builder().loadFromSource(indexSettings)
+                Settings.builder().loadFromSource(indexSettings)
                         .build());
         //               runner.createIndex(index, null);
         runner.ensureYellow(index);
