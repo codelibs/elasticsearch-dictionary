@@ -628,15 +628,15 @@ public class DictionarySnapshotService extends AbstractComponent {
         }
     }
 
-    private static class DeleteDictionaryRequest extends TransportRequest {
+    public static class DeleteDictionaryRequest extends TransportRequest {
 
         private String repository;
         private String snapshot;
 
-        DeleteDictionaryRequest() {
+        public DeleteDictionaryRequest() {
         }
 
-        DeleteDictionaryRequest(String repository, String snapshot) {
+        public DeleteDictionaryRequest(String repository, String snapshot) {
             this.repository = repository;
             this.snapshot = snapshot;
         }

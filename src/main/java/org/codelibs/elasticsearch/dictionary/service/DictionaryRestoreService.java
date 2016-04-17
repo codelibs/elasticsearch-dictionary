@@ -425,14 +425,14 @@ public class DictionaryRestoreService extends AbstractComponent {
         }
     }
 
-    private static class RestoreDictionaryRequest extends TransportRequest {
+    public static class RestoreDictionaryRequest extends TransportRequest {
 
         private String[] indices;
 
-        RestoreDictionaryRequest() {
+        public RestoreDictionaryRequest() {
         }
 
-        RestoreDictionaryRequest(final String[] indices) {
+        public RestoreDictionaryRequest(final String[] indices) {
             this.indices = indices;
         }
 
