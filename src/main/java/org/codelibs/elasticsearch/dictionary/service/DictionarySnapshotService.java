@@ -601,7 +601,7 @@ public class DictionarySnapshotService extends AbstractComponent {
     }
 
     class DeleteDictionaryRequestHandler
-            implements TransportRequestHandler<DeleteDictionaryRequest> {
+            extends TransportRequestHandler<DeleteDictionaryRequest> {
 
         @Override
         public void messageReceived(final DeleteDictionaryRequest request, final TransportChannel channel) throws Exception {

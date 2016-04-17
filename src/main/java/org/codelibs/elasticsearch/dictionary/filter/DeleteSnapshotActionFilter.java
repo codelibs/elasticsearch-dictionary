@@ -11,6 +11,7 @@ import org.elasticsearch.action.support.ActionFilterChain;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.tasks.Task;
 
 public class DeleteSnapshotActionFilter extends AbstractComponent implements
         ActionFilter {
@@ -37,12 +38,12 @@ public class DeleteSnapshotActionFilter extends AbstractComponent implements
     }
 
     @Override
-    public void apply(final String action,
+    public void apply(final Task task, final String action,
             @SuppressWarnings("rawtypes") final ActionRequest request,
             @SuppressWarnings("rawtypes") final ActionListener listener,
             final ActionFilterChain chain) {
         if (!DeleteSnapshotAction.NAME.equals(action)) {
-            chain.proceed(action, request, listener);
+            chain.proceed(task, action, request, listener);
         } else {
             final DeleteSnapshotRequest deleteSnapshotRequest = (DeleteSnapshotRequest) request;
             dictionarySnapshotService.deleteDictionarySnapshot(
@@ -52,7 +53,7 @@ public class DeleteSnapshotActionFilter extends AbstractComponent implements
 
                         @Override
                         public void onResponse(Void response) {
-                            chain.proceed(action, request, listener);
+                            chain.proceed(task, action, request, listener);
                         }
 
                         @Override

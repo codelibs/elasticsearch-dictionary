@@ -15,6 +15,7 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.snapshots.SnapshotInfo;
+import org.elasticsearch.tasks.Task;
 
 public class CreateSnapshotActionFilter extends AbstractComponent implements
         ActionFilter {
@@ -44,15 +45,15 @@ public class CreateSnapshotActionFilter extends AbstractComponent implements
     }
 
     @Override
-    public void apply(final String action,
+    public void apply(final Task task, final String action,
             @SuppressWarnings("rawtypes") final ActionRequest request,
             @SuppressWarnings("rawtypes") final ActionListener listener,
             final ActionFilterChain chain) {
         if (!CreateSnapshotAction.NAME.equals(action)) {
-            chain.proceed(action, request, listener);
+            chain.proceed(task, action, request, listener);
         } else {
             final CreateSnapshotRequest createSnapshotRequest = (CreateSnapshotRequest) request;
-            chain.proceed(action, request, new ActionListenerWrapper<>(
+            chain.proceed(task, action, request, new ActionListenerWrapper<>(
                     listener, new SnapshotId(
                             createSnapshotRequest.repository(),
                             createSnapshotRequest.snapshot())));

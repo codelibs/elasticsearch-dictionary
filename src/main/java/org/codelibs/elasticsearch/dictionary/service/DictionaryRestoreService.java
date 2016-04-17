@@ -315,7 +315,7 @@ public class DictionaryRestoreService extends AbstractComponent {
     }
 
     class RestoreDictionaryRequestHandler
-            implements TransportRequestHandler<RestoreDictionaryRequest> {
+            extends TransportRequestHandler<RestoreDictionaryRequest> {
 
         @Override
         public void messageReceived(final RestoreDictionaryRequest request,

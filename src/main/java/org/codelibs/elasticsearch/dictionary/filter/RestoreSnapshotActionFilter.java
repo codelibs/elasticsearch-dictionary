@@ -12,6 +12,7 @@ import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.tasks.Task;
 
 public class RestoreSnapshotActionFilter extends AbstractComponent implements
         ActionFilter {
@@ -41,12 +42,12 @@ public class RestoreSnapshotActionFilter extends AbstractComponent implements
     }
 
     @Override
-    public void apply(final String action,
+    public void apply(final Task task, final String action,
             @SuppressWarnings("rawtypes") final ActionRequest request,
             @SuppressWarnings("rawtypes") final ActionListener listener,
             final ActionFilterChain chain) {
         if (!RestoreSnapshotAction.NAME.equals(action) || !clusterService.state().nodes().localNodeMaster()) {
-            chain.proceed(action, request, listener);
+            chain.proceed(task, action, request, listener);
         } else {
             final RestoreSnapshotRequest restoreSnapshotRequest = (RestoreSnapshotRequest) request;
             dictionaryRestoreService.restoreDictionarySnapshot(
@@ -55,7 +56,7 @@ public class RestoreSnapshotActionFilter extends AbstractComponent implements
 
                         @Override
                         public void onResponse(final Void response) {
-                            chain.proceed(action, request, listener);
+                            chain.proceed(task, action, request, listener);
                         }
 
                         @Override
