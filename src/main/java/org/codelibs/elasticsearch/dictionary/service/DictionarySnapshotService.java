@@ -110,13 +110,13 @@ public class DictionarySnapshotService extends AbstractComponent {
                 ((CreateSnapshotActionFilter) filter)
                         .setDictionarySnapshotService(this);
                 if (logger.isDebugEnabled()) {
-                    logger.debug("Set CreateSnapshotActionFilter to " + filter);
+                    logger.debug("Set CreateSnapshotActionFilter to {}", filter);
                 }
             } else if (filter instanceof DeleteSnapshotActionFilter) {
                 ((DeleteSnapshotActionFilter) filter)
                         .setDictionarySnapshotService(this);
                 if (logger.isDebugEnabled()) {
-                    logger.debug("Set DeleteSnapshotActionFilter to " + filter);
+                    logger.debug("Set DeleteSnapshotActionFilter to {}", filter);
                 }
             }
         }

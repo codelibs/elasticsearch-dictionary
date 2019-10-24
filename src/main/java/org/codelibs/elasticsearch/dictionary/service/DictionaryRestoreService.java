@@ -99,7 +99,7 @@ public class DictionaryRestoreService extends AbstractComponent {
                 ((RestoreSnapshotActionFilter) filter)
                         .setDictionaryRestoreService(this);
                 if (logger.isDebugEnabled()) {
-                    logger.debug("Set DictionaryRestoreService to " + filter);
+                    logger.debug("Set DictionaryRestoreService to {}", filter);
                 }
             }
         }
